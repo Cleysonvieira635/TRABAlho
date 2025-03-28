@@ -1,135 +1,99 @@
-import sqlite3
-
-# Conectar ao banco de dados
-conn = sqlite3.connect('demanda_artificial.db')
-cursor = conn.cursor()
-
-# Criar tabela de acordos de pré-compra
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS acordos_precompra (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    distribuidor TEXT,
-    produto TEXT,
-    quantidade INTEGER,
-    data_acordo TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-# Criar tabela de notícias financeiras monitoradas
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS noticias_financeiras (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    titulo TEXT,
-    fonte TEXT,
-    impacto TEXT,  -- 'positivo', 'negativo', 'neutro'
-    data_publicacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-# Criar tabela de campanhas de influência de mídia
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS campanhas_midia (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    canal TEXT,
-    tipo TEXT,  -- 'relatório', 'publicidade', 'notícia manipulada'
-    impacto TEXT,  -- 'alta demanda', 'escassez', 'oportunidade'
-    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-conn.commit()
-# Função para registrar uma nova campanha de influência
-def criar_campanha_influencia(canal, tipo, impacto):
-    cursor.execute("INSERT INTO campanhas_midia (canal, tipo, impacto) VALUES (?, ?, ?)",
-                   (canal, tipo, impacto))
-    conn.commit()
-    print(f"Campanha lançada: {canal} - {tipo} - Impacto: {impacto}")
-
-# Criando campanhas de urgência
-criar_campanha_influencia("Jornal Econômico", "relatório", "alta demanda")
-criar_campanha_influencia("Portal de Commodities", "notícia manipulada", "escassez")
+from telethon import TelegramClient, events
+from twilio.rest import Client as TwilioClient
+from fastapi import FastAPI
+from pydantic import BaseModel
+import uvicorn
 import requests
 from bs4 import BeautifulSoup
+import pandas_datareader as pdr
 
-# Função para capturar notícias de um portal financeiro
-def capturar_noticias():
-    url = "https://www.exemplo.com/noticias-financeiras"  # Altere para uma fonte real
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
+# Parâmetros para API do Telegram
+api_id = "SUA_API_ID"
+api_hash = "SUA_API_HASH"
+grupo_vip = "grupo_traders"  # Usar o identificador do grupo ou chat do Telegram, não o link completo
 
-    noticias = []
-    for artigo in soup.find_all("article"):
-        titulo = artigo.find("h2").text
-        fonte = "Exemplo Financeiro"
-        impacto = "neutro"  # Definir impacto com análise de sentimento
+# Criação do cliente do Telegram
+client = TelegramClient("monitoramento", api_id, api_hash)
 
-        noticias.append((titulo, fonte, impacto))
-        cursor.execute("INSERT INTO noticias_financeiras (titulo, fonte, impacto) VALUES (?, ?, ?)",
-                       (titulo, fonte, impacto))
+@client.on(events.NewMessage(chats=grupo_vip))
+async def monitorar_mensagens(event):
+    mensagem = event.raw_text
+    if "compra" in mensagem or "venda" in mensagem:
+        print(f"Nova oportunidade: {mensagem}")
 
-    conn.commit()
-    return noticias
-from textblob import TextBlob
+client.start()
+client.run_until_disconnected()
 
-# Função para analisar sentimento de uma notícia
-def analisar_sentimento(texto):
-    analise = TextBlob(texto)
-    polaridade = analise.sentiment.polarity
+# Parâmetros para Twilio API
+account_sid = "SEU_ACCOUNT_SID"
+auth_token = "SEU_AUTH_TOKEN"
+twilio_client = TwilioClient(account_sid, auth_token)
 
-    if polaridade > 0:
-        return "positivo"
-    elif polaridade < 0:
-        return "negativo"
-    else:
-        return "neutro"
+# Consultando mensagens do grupo VIP no WhatsApp via Twilio
+# Este código precisa de um número de WhatsApp registrado no Twilio (não pode ser apenas um link)
+# Lembre-se de substituir "+123456789" pelo número correto do grupo VIP.
+mensagens = twilio_client.messages.list(from_="whatsapp:+123456789")  # Número de origem no WhatsApp
+for msg in mensagens:
+    if "cotação" in msg.body.lower():
+        print(f"Oportunidade identificada: {msg.body}")
 
-# Aplicar análise de sentimento às notícias capturadas
-def atualizar_impacto_noticias():
-    cursor.execute("SELECT id, titulo FROM noticias_financeiras WHERE impacto = 'neutro'")
-    noticias = cursor.fetchall()
-
-    for id_noticia, titulo in noticias:
-        impacto = analisar_sentimento(titulo)
-        cursor.execute("UPDATE noticias_financeiras SET impacto = ? WHERE id = ?", (impacto, id_noticia))
-
-    conn.commit()
-
-atualizar_impacto_noticias()
-# Criar um acordo de pré-compra estratégico
-def criar_acordo_precompra(distribuidor, produto, quantidade):
-    cursor.execute("INSERT INTO acordos_precompra (distribuidor, produto, quantidade) VALUES (?, ?, ?)",
-                   (distribuidor, produto, quantidade))
-    conn.commit()
-    print(f"Acordo de pré-compra criado: {distribuidor} reservou {quantidade} unidades de {produto}.")
-
-# Criando acordos com distribuidores para simular escassez
-criar_acordo_precompra("Distribuidor X", "Soja", 50000)
-criar_acordo_precompra("Distribuidor Y", "Milho", 30000)
-from fastapi import FastAPI
-
+# Criação da API FastAPI
 app = FastAPI()
 
-# Rota para listar campanhas de influência
-@app.get("/campanhas_midia")
-def listar_campanhas():
-    cursor.execute("SELECT * FROM campanhas_midia")
-    campanhas = cursor.fetchall()
-    return {"campanhas": campanhas}
+# Estrutura dos lances para leilão
+class Lance(BaseModel):
+    produto: str
+    preco: float
+    quantidade: int
+    comprador: str
 
-# Rota para listar notícias financeiras monitoradas
-@app.get("/noticias_financeiras")
-def listar_noticias():
-    cursor.execute("SELECT * FROM noticias_financeiras")
-    noticias = cursor.fetchall()
-    return {"noticias": noticias}
+lances = []
 
-# Rota para listar acordos de pré-compra
-@app.get("/acordos_precompra")
-def listar_acordos():
-    cursor.execute("SELECT * FROM acordos_precompra")
-    acordos = cursor.fetchall()
-    return {"acordos_precompra": acordos}
+@app.post("/leilao/novo_lance/")
+def novo_lance(lance: Lance):
+    lances.append(lance.dict())
+    return {"mensagem": "Lance registrado com sucesso", "lance": lance}
 
+# Rodar o servidor FastAPI
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
-uvicorn nome_do_arquivo:app --reload
+# Função para capturar dados de fundos de investimento que operam commodities
+# Exemplo de fundo de hedge para commodities (certifique-se de que o código é válido)
+dados_fundos = pdr.get_data_fred("HFRXGL", start="2024-01-01")
+print(dados_fundos.tail())
 
+# Função para capturar dados de fundos de hedge via web scraping
+url = "https://www.hedgefundsdata.com/report"
+response = requests.get(url)
+soup = BeautifulSoup(response.text, "html.parser")
+
+# Extração de informações de fundos de hedge
+for fundo in soup.find_all("div", class_="fund-info"):
+    nome = fundo.find("h2").text
+    ativo = fundo.find("span", class_="commodity").text
+    print(f"Fundo: {nome} - Ativo: {ativo}")
+
+# Função para analisar oportunidades de leilão, fundos e mensagens de grupos VIP
+def analisar_oportunidades(leiloes, fundos, mensagens):
+    oportunidades = []
+    
+    # Verificar leilões com base nos fundos preferenciais
+    for lance in leiloes:
+        if any(f["ativo"] in lance["produto"] for f in fundos):
+            oportunidades.append(f"Oportunidade no leilão: {lance}")
+    
+    # Verificar mensagens de compra no grupo VIP
+    for msg in mensagens:
+        if "compra" in msg:
+            oportunidades.append(f"Potencial comprador no grupo VIP: {msg}")
+
+    return oportunidades
+
+# Exemplo de uso
+leiloes = [{"produto": "Soja", "preco": 600, "quantidade": 100}]
+fundos = [{"ativo": "Soja", "movimento": "Compra"}]
+mensagens = ["Alguém vendendo Soja?"]
+
+oportunidades = analisar_oportunidades(leiloes, fundos, mensagens)
+print(oportunidades)
