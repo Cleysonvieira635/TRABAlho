@@ -2,173 +2,186 @@ import time
 import pandas as pd
 import sqlite3
 import requests
+import schedule  # Certifique-se de que está instalado com: pip install schedule
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
-from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
 from fastapi import FastAPI
 from datetime import datetime
-import json
 
-# Banco de dados
-conn = sqlite3.connect("dados_commodities.db")
-cursor = conn.cursor()
+# Configuração de credenciais para APIs (substituir pelos valores reais)
+API_KEYS = {
+    "shopify": "SUA_CHAVE_SHOPIFY",
+    "amazon": "SUA_CHAVE_AMAZON",
+    "alibaba": "SUA_CHAVE_ALIBABA",
+    "panjiva": "SUA_CHAVE_PANJIVA",
+    "b3": "SUA_CHAVE_B3",
+    "usda": "SUA_CHAVE_USDA",
+    "conab": "SUA_CHAVE_CONAB",
+    "cepea": "SUA_CHAVE_CEPEA",
+    "agflow": "SUA_CHAVE_AGFLOW",
+    "tridge": "SUA_CHAVE_TRIDGE",
+    "barchart": "SUA_CHAVE_BARCHART"
+}
 
-# Criar tabelas no banco de dados
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS leiloes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    produto TEXT,
-    preco_atual TEXT,
-    encerramento TEXT,
-    data_extracao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS compras_governamentais (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    titulo TEXT,
-    descricao TEXT,
-    valor TEXT,
-    data_extracao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS importacoes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    produto TEXT,
-    origem TEXT,
-    data_chegada TEXT,
-    valor TEXT,
-    data_extracao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-conn.commit()
+# Classe para gerenciamento do banco de dados
+class Database:
+    def __init__(self, db_name="dados_commodities.db"):
+        self.db_name = db_name
 
-# FastAPI para acessar os dados via API
-app = FastAPI()
+    def connect(self):
+        return sqlite3.connect(self.db_name, check_same_thread=False)
 
-@app.get("/leiloes")
-def listar_leiloes():
-    cursor.execute("SELECT * FROM leiloes ORDER BY data_extracao DESC")
-    leiloes = cursor.fetchall()
-    return {"leiloes": leiloes}
+    def execute(self, query, params=None, fetch=False, many=False):
+        conn = self.connect()
+        cursor = conn.cursor()
+        try:
+            if many and params:
+                cursor.executemany(query, params)
+            elif params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            
+            if fetch:
+                return cursor.fetchall()
+            else:
+                conn.commit()
+        except Exception as e:
+            print(f"Erro no banco de dados: {e}")
+        finally:
+            conn.close()
 
-@app.get("/compras_governamentais")
-def listar_compras_governamentais():
-    cursor.execute("SELECT * FROM compras_governamentais ORDER BY data_extracao DESC")
-    compras = cursor.fetchall()
-    return {"compras_governamentais": compras}
+# Inicializa o banco de dados
+db = Database()
 
-@app.get("/importacoes")
-def listar_importacoes():
-    cursor.execute("SELECT * FROM importacoes ORDER BY data_extracao DESC")
-    importacoes = cursor.fetchall()
-    return {"importacoes": importacoes}
+# Função para buscar dados de uma API genérica
+def buscar_dados_api(nome_api, url, headers=None, params=None):
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Erro ao acessar API {nome_api}: {e}")
+        return None
 
-# Funções de web scraping
+# Funções específicas para cada API
+def capturar_dados_shopify():
+    url = "https://api.shopify.com/v1/products.json"
+    headers = {"Authorization": f"Bearer {API_KEYS['shopify']}"}
+    dados = buscar_dados_api("Shopify", url, headers)
+    if dados:
+        for produto in dados.get("products", []):
+            print(f"Produto Shopify: {produto.get('title', 'N/A')} - Preço: {produto.get('variants', [{}])[0].get('price', 'N/A')}")
 
-# Função para capturar leilões de commodities
-def capturar_leiloes():
-    url = "https://www.leiloescommodities.com.br"
-    driver = webdriver.Chrome()
-    driver.get(url)
-    time.sleep(3)
-    
-    html = driver.page_source
-    soup = BeautifulSoup(html, "html.parser")
-    leiloes = []
-    for item in soup.find_all("div", class_="leilao"):
-        produto = item.find("h2").text.strip()
-        preco_atual = item.find("span", class_="preco").text.strip()
-        encerramento = item.find("span", class_="data").text.strip()
-        leiloes.append((produto, preco_atual, encerramento))
-    
-    cursor.executemany("INSERT INTO leiloes (produto, preco_atual, encerramento) VALUES (?, ?, ?)", leiloes)
-    conn.commit()
-    driver.quit()
+def capturar_dados_amazon():
+    url = "https://api.amazon.com/products"
+    headers = {"Authorization": f"Bearer {API_KEYS['amazon']}"}
+    dados = buscar_dados_api("Amazon", url, headers)
+    if dados:
+        for produto in dados.get("items", []):
+            print(f"Produto Amazon: {produto.get('title', 'N/A')} - Preço: {produto.get('price', 'N/A')}")
 
-# Função para capturar compras governamentais
-def capturar_compras_governamentais():
-    url = "https://www.portaldecompras.gov.br/licitacoes"
-    driver = webdriver.Chrome()
-    driver.get(url)
-    time.sleep(3)
-    
-    html = driver.page_source
-    soup = BeautifulSoup(html, "html.parser")
-    compras = []
-    for item in soup.find_all("div", class_="licitacao"):
-        titulo = item.find("h2").text.strip()
-        descricao = item.find("p").text.strip()
-        valor = item.find("span", class_="valor").text.strip()
-        compras.append((titulo, descricao, valor))
-    
-    cursor.executemany("INSERT INTO compras_governamentais (titulo, descricao, valor) VALUES (?, ?, ?)", compras)
-    conn.commit()
-    driver.quit()
+def capturar_dados_alibaba():
+    url = "https://api.alibaba.com/products"
+    headers = {"Authorization": f"Bearer {API_KEYS['alibaba']}"}
+    dados = buscar_dados_api("Alibaba", url, headers)
+    if dados:
+        for produto in dados.get("products", []):
+            print(f"Produto Alibaba: {produto.get('name', 'N/A')} - Preço: {produto.get('price', 'N/A')}")
 
-# Função para capturar dados de importações usando API
-def capturar_importacoes():
-    url = "https://api.exemplo.com/importacoes"  # URL fictícia da API
-    response = requests.get(url)
-    dados_importacao = response.json()
-    
-    importacoes = []
-    for item in dados_importacao['data']:
-        produto = item["produto"]
-        origem = item["origem"]
-        data_chegada = item["data_chegada"]
-        valor = item["valor"]
-        importacoes.append((produto, origem, data_chegada, valor))
-    
-    cursor.executemany("INSERT INTO importacoes (produto, origem, data_chegada, valor) VALUES (?, ?, ?, ?)", importacoes)
-    conn.commit()
-
-# Função de análise preditiva de demanda com Machine Learning
+# Função de análise preditiva
 def analise_predictiva_demanda():
-    # Exemplo de dados para análise preditiva (substituir por dados reais)
-    dados = pd.read_sql_query("SELECT * FROM leiloes", conn)
-    dados['preco_atual'] = dados['preco_atual'].apply(pd.to_numeric, errors='coerce')
-    dados = dados.dropna()
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='leiloes'")
+        tabela_existe = cursor.fetchone()
+        if not tabela_existe:
+            print("Tabela 'leiloes' não encontrada.")
+            return
+        
+        dados = pd.read_sql_query("SELECT preco_atual FROM leiloes", conn)
+        conn.close()
 
-    X = dados[['preco_atual']]  # Previsores
-    y = dados['preco_atual']  # Variável alvo
+        if dados.empty:
+            print("Sem dados para análise preditiva.")
+            return
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        # Simulação de mais variáveis para melhorar a previsão
+        dados["var_dummy"] = range(len(dados))  
 
-    # Normalizar os dados
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
+        X = dados[['preco_atual', 'var_dummy']]
+        y = dados['preco_atual']
 
-    model = RandomForestRegressor()
-    model.fit(X_train, y_train)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Previsão
-    previsoes = model.predict(X_test)
-    print(f"Previsões: {previsoes}")
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
 
-# Função para monitoramento de padrões de importação
-def monitorar_importacoes():
-    # Exemplo simples de monitoramento
-    cursor.execute("SELECT produto, valor FROM importacoes")
-    importacoes = cursor.fetchall()
-    for produto, valor in importacoes:
-        if float(valor) < 1000:  # Exemplo de regra de monitoramento
-            print(f"Alerta! Produto {produto} abaixo do valor esperado: {valor}")
+        model = RandomForestRegressor()
+        model.fit(X_train, y_train)
 
-# Loop para executar as funções periodicamente
-def executar_monitoramento():
+        previsoes = model.predict(X_test)
+        print(f"Previsões: {previsoes}")
+    except Exception as e:
+        print(f"Erro na análise preditiva: {e}")
+
+# **Agente IA para tomada de decisão**
+def agente_ia():
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='leiloes'")
+        tabela_existe = cursor.fetchone()
+        if not tabela_existe:
+            print("Tabela 'leiloes' não encontrada.")
+            return
+        
+        dados = pd.read_sql_query("SELECT preco_atual FROM leiloes", conn)
+        conn.close()
+
+        if dados.empty:
+            print("Sem dados para análise do agente IA.")
+            return
+
+        media_precos = dados["preco_atual"].mean()
+        
+        if media_precos > 1000:
+            print(f"[IA] Alerta: Preços médios altos ({media_precos:.2f}). Oportunidade de venda!")
+        elif media_precos < 500:
+            print(f"[IA] Preços baixos detectados ({media_precos:.2f}). Estratégia de compra recomendada.")
+        else:
+            print(f"[IA] Mercado estável ({media_precos:.2f}). Monitoramento contínuo.")
+    except Exception as e:
+        print(f"Erro no agente IA: {e}")
+
+# Configuração do WebDriver do Selenium
+def iniciar_selenium():
+    try:
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service)
+        return driver
+    except Exception as e:
+        print(f"Erro ao iniciar WebDriver: {e}")
+        return None
+
+# Agendamento das tarefas
+schedule.every(1).hours.do(capturar_dados_shopify)
+schedule.every(1).hours.do(capturar_dados_amazon)
+schedule.every(1).hours.do(capturar_dados_alibaba)
+schedule.every(3).hours.do(analise_predictiva_demanda)
+schedule.every(2).hours.do(agente_ia)
+
+# Loop infinito para executar o agendamento
+try:
     while True:
-        capturar_leiloes()
-        capturar_compras_governamentais()
-        capturar_importacoes()
-        analise_predictiva_demanda()
-        monitorar_importacoes()
-        time.sleep(3600)  # Espera 1 hora para rodar novamente
-
-if __name__ == "__main__":
-    executar_monitoramento()
+        schedule.run_pending()
+        time.sleep(10)
+except KeyboardInterrupt:
+    print("Execução interrompida pelo usuário.")
