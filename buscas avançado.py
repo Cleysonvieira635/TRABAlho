@@ -1,5 +1,76 @@
 import requests
+import requests
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+import uvicorn
+import json
 
+# Exemplo de API de importadores
+def buscar_importadores(api_key, pais):
+    url = f"https://api.tridge.com/importadores?pais={pais}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return {"erro": "Falha ao acessar banco de dados"}
+
+# Exemplo de API de Alfândega
+def buscar_dados_alfandegarios(api_key, pais):
+    url = f"https://api.customsdata.com/{pais}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return {"erro": "Erro ao acessar dados alfandegários"}
+
+# Exemplo de API de Exportações (Sicex)
+def buscar_exportacoes(api_key, pais):
+    url = f"https://api.sicex.com/exportacoes?pais={pais}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return {"erro": "Erro ao acessar Sicex"}
+
+# FastAPI - Criar rotas
+app = FastAPI()
+
+# API de Importadores
+@app.get("/importadores/{pais}")
+def listar_importadores(pais: str):
+    api_key_tridge = "SUA_CHAVE_API"  # Substitua pela chave correta
+    return buscar_importadores(api_key_tridge, pais)
+
+# API de Dados Alfandegários
+@app.get("/alfandega/{pais}")
+def listar_dados_alfandega(pais: str):
+    api_key_customs = "SUA_CHAVE_API"  # Substitua pela chave correta
+    return buscar_dados_alfandegarios(api_key_customs, pais)
+
+# API de Exportações
+@app.get("/exportacoes/{pais}")
+def listar_exportacoes(pais: str):
+    api_key_sicex = "SUA_CHAVE_API"  # Substitua pela chave correta
+    return buscar_exportacoes(api_key_sicex, pais)
+
+# Serve os arquivos estáticos para o frontend React
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Servir o HTML com o React embutido
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    with open("static/index.html") as f:
+        return f.read()
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 # Exemplo fictício de API de um banco de dados de importadores
 def buscar_importadores(api_key, pais):
     url = f"https://api.tridge.com/importadores?pais={pais}"
@@ -129,4 +200,165 @@ function Importadores({ pais }) {
 }
 
 export default Importadores;
+
+/project
+  ├── main.py
+  └── static/
+      ├── index.html
+      └── app.js
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>API de Importadores e Alfândega</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+import React, { useEffect, useState } from "react";
+import ReactDOM from "react-dom";
+
+function Importadores({ pais }) {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch(`/importadores/${pais}`)
+      .then((response) => response.json())
+      .then((data) => {
+        setData(data);
+        setLoading(false);
+      })
+      .catch((error) => {
+        setError("Erro ao carregar dados");
+        setLoading(false);
+      });
+  }, [pais]);
+
+  if (loading) {
+    return <div>Carregando...</div>;
+  }
+
+  if (error) {
+    return <div>{error}</div>;
+  }
+
+  return (
+    <div>
+      <h2>Importadores em {pais}</h2>
+      <ul>
+        {data.map((item, index) => (
+          <li key={index}>
+            {item.nome} - {item.empresa}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Exportacoes({ pais }) {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch(`/exportacoes/${pais}`)
+      .then((response) => response.json())
+      .then((data) => {
+        setData(data);
+        setLoading(false);
+      })
+      .catch((error) => {
+        setError("Erro ao carregar dados");
+        setLoading(false);
+      });
+  }, [pais]);
+
+  if (loading) {
+    return <div>Carregando...</div>;
+  }
+
+  if (error) {
+    return <div>{error}</div>;
+  }
+
+  return (
+    <div>
+      <h2>Exportações de {pais}</h2>
+      <ul>
+        {data.map((item, index) => (
+          <li key={index}>
+            {item.pais} - {item.produto} - {item.volume}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Alfandega({ pais }) {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch(`/alfandega/${pais}`)
+      .then((response) => response.json())
+      .then((data) => {
+        setData(data);
+        setLoading(false);
+      })
+      .catch((error) => {
+        setError("Erro ao carregar dados");
+        setLoading(false);
+      });
+  }, [pais]);
+
+  if (loading) {
+    return <div>Carregando...</div>;
+  }
+
+  if (error) {
+    return <div>{error}</div>;
+  }
+
+  return (
+    <div>
+      <h2>Dados Alfandegários de {pais}</h2>
+      <ul>
+        {data.map((item, index) => (
+          <li key={index}>
+            {item.pais} - {item.produto} - {item.volume}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <div>
+      <Importadores pais="Brasil" />
+      <Exportacoes pais="Brasil" />
+      <Alfandega pais="Brasil" />
+    </div>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById("root"));
+
+pip install fastapi uvicorn requests
+
+npx create-react-app static
+
+uvicorn main:app --reload
+
+npm start
 
